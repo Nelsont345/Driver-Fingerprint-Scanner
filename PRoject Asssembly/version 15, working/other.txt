@@ -1,0 +1,97 @@
+/*
+ * AsmFile1.asm
+ *
+ *  Created: 14/11/2017 15:41:18
+ *   Author: nmt115
+ */ 
+  repeat_action: 
+
+
+ DATABASE_TO_SRAM2: ;saves to 0x0300
+;push r20
+
+
+
+makingZalocation2:
+	ldi XH, high(compare_address) ;create 16 bit address? ;0x0300
+	ldi XL, low(compare_address)  ;Leave as 8 bit
+
+	ldi ZH, HIGH(compare_database2*2)  ;leave as 16 bit
+    ldi ZL, LOW(compare_database2*2)
+	ldi r20, 12  ;counter
+
+	;address
+	
+program_to_memory2:
+	lpm 
+	;mov r19, r0 ;r19 cointans byte by byte
+	ADIW ZL, $01
+	dec r20
+	
+	;now you have data in r19 and you want to store it
+	
+	st X+, r0            ;don't need sts, if using X
+
+	;rcall del49ms
+	;end if counted
+	cpi r20, $0
+	breq program_to_memory_end2
+	rjmp program_to_memory2
+
+program_to_memory_end2:
+	;pop r20
+	rcall bigdel
+  ;Keep
+	rcall action2
+	ldi YH, high(testregister3) ;3A0     Match gets recorded
+	ldi YL, low(testregister3)
+	rcall send_genimg	
+	rcall BigDEL
+
+
+	ldi YH, high(testregister4) ;3C0   
+	ldi YL, low(testregister4)
+	rcall send_img2tBuff1
+	rcall BigDEL
+
+
+	ldi YH, high(testregister9) ;460   
+	ldi YL, low(testregister9)
+	rcall send_regmodel
+	rcall BigDEL
+
+
+	ldi YH, high(testregister6) ;400   
+	ldi YL, low(testregister6)
+	rcall send_Store1       
+	rcall BigDEL
+
+
+
+take_print:
+	ldi YH, high(testregister9) ;460  
+	ldi YL, low(testregister9)
+	rcall send_genimg	
+	rcall BigDEL
+
+
+	ldi YH, high(testregister9) ;460  
+	ldi YL, low(testregister9)
+	rcall send_img2tBuff1
+	rcall send_img2tBuff2
+	rcall BigDEL
+
+
+	ldi YH, high(testregister9) ;460   
+	ldi YL, low(testregister9)
+	rcall send_regmodel
+	rcall BigDEL
+	rcall BigDEL
+
+
+	ldi YH, high(testregister5) ; 3E0
+	ldi YL, low(testregister5)
+	rcall send_search
+	rcall BigDEL
+
+	ret

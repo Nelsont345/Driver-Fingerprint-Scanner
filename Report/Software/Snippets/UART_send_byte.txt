@@ -1,0 +1,30 @@
+UART_send_byte:	       
+;UART_TxPort = PORTD 
+;buffer = R23	
+  
+	ldi		r24, 10   				;counter that has 2 extra bits for the start and end of each byte
+	com		buffer	         		;com of signal to be sent, set in Mess1out
+	sec		                		;sets carry flag in SREG, to allow transmission
+
+; 12 clock cycles here (without delays)	
+uart_send_next_bit:													
+	brcc	uart_send_1					;goes to send a 1, if 0, due to com	;2				                  
+	cbi		UART_TxPort, 3				;clears bit for sending 
+	rjmp	uart_wait
+
+uart_send_1:																
+	sbi		UART_TxPort, 3													;4
+	nop																		;5
+
+uart_wait:							;delay routine
+	rcall 	UART_delay	
+	rcall 	UART_delay
+
+	nop	nop nop nop															;9
+	lsr		buffer					;move onto next bit to send				;10
+	dec		r24						;reduce counter							;11
+	brne	uart_send_next_bit		;branches if not counted to 0			;12   ;	Used to calculate 
+					
+	sbi		UART_TxPort, 3			;send final stop bit
+	ret								; retunr to send next byte
+		

@@ -1,0 +1,374 @@
+;Copyright (c) 2013 Manolis Agkopian		    
+;See the file LICENCE for copying permission.	    ;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+	.DEVICE ATmega128
+	.include "m128def.inc"
+
+
+
+;***** Pin definitions *****
+.equ	UART_TxPort = PORTD    ;set port D aS OUTPUT FOR TRANSMIT
+.equ	UART_TxDDR  = DDRD				;DIRECTION REGISTER
+.equ	UART_RxPin  = PIND				;sET PIN D FOR READ
+.equ	UART_RxDDR  = DDRD					;DIRECTION REGISTER
+.equ	RxD	= 2							;set pin  2 as receive, might be a different pin
+.equ	TxD	= 3								;set pin 3 as transmit
+
+;*****    Registers    *****
+.def	bitcounter  = R24				;??
+.def	temp	    = R17			;COUNTER?
+.def	UART_buffer = R23			;WHat IS BUFFER?
+
+;*****  Speed setting  *****
+.equ	CRYSTAL_FREQ = 8000000   ;SET READ/ WRITE TO BE EQUAL, 8MHZ, now 1
+.equ	BAUD 		 =  57600  ;57600     ;bits per second, rate ;9600
+
+;*****       Etc       *****
+.equ	stop_bits 	       = 1     ;STOPS READING
+; hand-picked for easier auto-baud calculations (no division)
+.equ	cycles_per_bit 	   = 12 ;without delays + 4*nop
+.equ	const_delay_cycles = 9	;rjmp + ret + 2*nop
+
+; byte in ram that keeps speed
+.dseg
+DELAY_VALUE: .byte 1        ;assign memory for clock speed value?
+.cseg
+
+;***** Precalculations *****
+;pure cycles necessary per bit
+.equ	c = CRYSTAL_FREQ / BAUD			;relates clock speed to transmission
+;delay cycles
+.equ	d = (c - cycles_per_bit - 2*const_delay_cycles)/2
+;delay value	
+.equ	b = d / 3						;divison by 3 of d, definition
+
+; throw error if we're out of bounds
+.if b > 255
+	.error "Baud rate is too low!"		;check if transmission speed is correct
+.elif b <= 0
+	.error "Baud rate is too high!"
+.endif
+
+		ldi r16, $0F		; Stack Pointer Setup
+		out SPH,r16			; Stack Pointer High Byte 
+		ldi r16, $FF		; Stack Pointer Setup 
+		out SPL,r16			; Stack Pointer Low Byte 
+rjmp main
+;****************************************************
+;**********************CODE HERE*********************
+;****************************************************
+
+;****************************************************
+;*****                 SEND BYTE                *****
+;****************************************************
+; UART_buffer -> UART
+UART_send_byte:	
+	ldi		bitcounter, 9 + stop_bits ;CHECK IF CORRECRT, 7 + stop_bits
+	com		UART_buffer	
+	sec		
+
+; 12 cycles here (without delays)
+uart_send_next_bit:	
+	brcc	uart_send_1
+	cbi		UART_TxPort, TxD
+	rjmp	uart_wait
+
+uart_send_1:	
+	sbi		UART_TxPort, TxD
+	nop
+
+uart_wait:	
+	rcall 	UART_delay	
+	rcall 	UART_delay
+
+	nop	nop nop nop
+	lsr		UART_buffer
+	dec		bitcounter		
+	brne	uart_send_next_bit
+					
+	sbi		UART_TxPort, TxD
+	ret		
+		
+;****************************************************
+;*****                 GET BYTE                 *****
+;****************************************************
+; UART -> UART_buffer
+UART_get_byte:	
+	ldi 	bitcounter, 9
+
+uart_wait_for_start:	
+	sbic 	UART_RxPin, RxD	
+	rjmp 	uart_wait_for_start
+	;synchronize for 0.5 bit length
+	rcall 	UART_delay	
+
+; 10 cycles here (without delays)
+uart_get_bit:	
+	rcall 	UART_delay	
+	rcall 	UART_delay		
+
+	clc			
+	sbic 	UART_RxPin, RxD	
+	sec			
+	
+	nop	nop nop nop
+	dec 	bitcounter		
+	breq 	uart_bit_done	
+				
+	ror 	UART_buffer		
+	rjmp 	uart_get_bit	
+
+uart_bit_done:	
+	ret
+
+;****************************************************
+;*****                UART DELAY                *****
+;****************************************************
+; 3*b + const_delay_cycles
+UART_delay:	
+	lds		temp, DELAY_VALUE
+UART_delay1:	
+	dec		temp
+	brne	UART_delay1
+	nop
+	ret
+
+;****************************************************
+;*****              UART AUTO-BAUD              *****
+;****************************************************
+; calculates calc_b after receiving 0x55
+; calc_b -> temp
+; intermediate result is c/6
+; sbis (2) + inc (1) + breq (2) + nop (1)
+
+UART_autocalibrate:
+	clr 	temp
+	
+uart_cal_wait_start:	
+	sbic 	UART_RxPin, RxD	
+	rjmp 	uart_cal_wait_start
+
+uart_cal_wait_bit:	
+	sbis 	UART_RxPin, RxD	
+	rjmp 	uart_cal_wait_bit
+
+uart_measure_bit:
+	sbis 	UART_RxPin, RxD		
+	rjmp 	uart_calibration_done
+	nop
+	inc		temp
+	breq	uart_calibration_fail
+
+uart_calibration_done:
+	; b = c/6 - cycles_per_bit/6 - const_delay_cycles/3
+	; temp = c/6
+	cpi		temp, cycles_per_bit/6
+	brlo	uart_calibration_fail
+	subi	temp, cycles_per_bit/6
+
+	cpi		temp, const_delay_cycles/3
+	brlo	uart_calibration_fail
+	subi	temp, const_delay_cycles/3
+
+	sts		DELAY_VALUE, temp
+
+uart_calibration_fail:
+	ret
+
+;****************************************************
+;*****               UART REINIT                *****
+;****************************************************
+; just resets DELAY_VALUE to default
+uart_reinit:
+
+
+
+	in		temp, UART_TxDDR
+	ori		temp, (1<<TxD)
+	out		UART_TxDDR, temp
+	sbi		UART_TxPort, TxD
+
+	in		temp, UART_RxDDR
+	andi	temp, ~(1<<RxD) ;error
+	out		UART_RxDDR, temp
+
+	ldi		temp, b
+	sts		DELAY_VALUE, temp
+	ret
+
+	ldi temp, $01
+	ret
+
+main:
+	;rcall Idisp
+	rcall uart_reinit
+sendloop:
+
+	;ldi UART_buffer, $40
+	; call sending rmess routinge
+	rcall Mess1Out
+	rcall DEL49ms
+	;rcall UART_send_byte
+	; UART BUFFER is the data to send
+	
+	
+	
+	rjmp sendloop
+	
+
+Mess1:
+;.db $0F, $0
+
+;.db $0,$0, $FF, $FF ,$0,$0
+;.db $0F, $0
+
+;Handshake
+;.db $EF,$01,$FF,$FF,$FF,$FF,$01,$00,$04,$17,$00,$00,$1C,$00
+
+;genimg
+.db $EF,$01,$FF,$FF,$FF,$FF,$01,$00,$03,$01,$00,$05,$01,$00
+
+;.db $0F, $0F
+;
+Mess1Out:
+              LDI ZH, HIGH(2*Mess1)
+              LDI ZL, LOW(2*Mess1)
+              LDI r18, 12 ;number of characters or bytes ; this displays the number of r18 ; to send command 13
+Mess1More:
+              LPM 
+              MOV r17, r0
+              mov UART_buffer,r17
+			  rcall UART_send_byte
+              ;rcall Mess1LCD ; send it To LCD
+			  ;rcall busylcd
+              
+			  ;delay this
+			
+			;rcall UART_delay
+			;rcall UART_delay
+			rcall UART_delay
+			
+			  
+			  DEC r18
+			  cpi r18, $0
+			  breq Mess1End
+			  ADIW ZL, $01
+			  rjmp Mess1More
+			  ; if r18>0 then retrurn to mess1more
+Mess1End:     ret
+
+Mess1LCD:     sts $C000, r17
+			  rcall busylcd
+			  ret
+
+
+;*************************************** LCD ROutines
+
+;*******************************************************************************
+; Display Initialization routine
+;
+; Since we cannot rely that that Power Supply will have on power up
+; the required by Hitachi Specs.....we do the initialization 'by hand'.
+; Follow Blindly the White-Red Book of Hitachi.
+; Hitachi Liquid Crystal Disply LCD Initialization Sequence.
+;
+Idisp:		
+		RCALL DEL15ms                ; wait 15ms for things to relax after power up           
+		ldi r16,    $30	         ; Hitachi says do it...
+		sts   $8000,r16                      ; so i do it....
+		RCALL DEL4P1ms             ; Hitachi says wait 4.1 msec
+		sts   $8000,r16	         ; and again I do what I'm told
+		rcall Del49ms
+		sts   $8000,r16	         ; here we go again folks
+                rcall busylcd		
+		ldi r16, $3F	         ; Function Set : 2 lines + 5x7 Font
+		sts  $8000,r16
+                rcall busylcd
+		ldi r16,  $08	         ;display off
+		sts  $8000, r16
+                rcall busylcd		
+		ldi r16,  $01	         ;display on
+		sts  $8000,  r16
+                rcall busylcd
+                ldi r16, $38	        ;function set
+		sts  $8000, r16
+		rcall busylcd
+		ldi r16, $0E	        ;display on
+		sts  $8000, r16
+		rcall busylcd
+		ldi r16, $06                           ;entry mode set increment no shift
+		sts  $8000,  r16
+                rcall busylcd
+                clr r16
+                ret
+;
+;**********************************************************************************
+; This clears the display so we can start all over again
+;
+CLRDIS:
+	        ldi r16,$01	; Clear Display send cursor 
+		sts $8000,r16   ; to the most left position
+		rcall busylcd
+                ret
+;**********************************************************************************
+; A routine the probes the display BUSY bit
+;
+   
+busylcd:        
+        lds r16, $8000   ;access 
+        sbrc r16, 7      ;check busy bit  7
+        rjmp busylcd
+        rcall BigDEL
+
+        ret              ;return if clear
+;
+;********************   DELAY ROUTINES ********************************************
+BigDEL:
+             rcall Del49ms
+             rcall Del49ms
+             rcall Del49ms
+             rcall Del49ms
+             rcall Del49ms
+             ret
+;
+DEL15ms:
+;
+; This is a 15 msec delay routine. Each cycle costs
+; rcall           -> 3 CC
+; ret              -> 4 CC
+; 2*LDI        -> 2 CC 
+; SBIW         -> 2 CC * 19997
+; BRNE        -> 1/2 CC * 19997
+; 
+
+            LDI XH, HIGH(19997)
+            LDI XL, LOW (19997)
+COUNT:  
+            SBIW XL, 1
+            BRNE COUNT
+            RET
+;
+DEL4P1ms:
+            LDI XH, HIGH(5464)
+            LDI XL, LOW (5464)
+COUNT1:
+            SBIW XL, 1
+            BRNE COUNT1
+            RET 
+;
+DEL100mus:
+            LDI XH, HIGH(131)
+            LDI XL, LOW (131)
+COUNT2:
+            SBIW XL, 1
+            BRNE COUNT2
+            RET 
+;
+DEL49ms:
+            LDI XH, HIGH(65535)
+            LDI XL, LOW (65535)
+COUNT3:
+            SBIW XL, 1
+            BRNE COUNT3
+            RET 

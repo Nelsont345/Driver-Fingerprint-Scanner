@@ -1,0 +1,356 @@
+/*
+ * AsmFile1.asm
+ *
+ *  Created: 14/11/2017 15:41:18
+ *   Author: nmt115
+
+ Includes All action routines
+*/
+
+
+;11111111111111111111111 Action 1 1111111111111111111111111111111111111111111
+;compares 2 given finger prints
+action1:
+	rcall DATABASE_TO_SRAM ;this takes the compasioson message and saves that in memory at 0x0300
+	rcall Print1
+	ldi YH, high(testregister5) ; 3E0
+	ldi YL, low(testregister5)
+	rcall send_precisematch
+	rcall Bigdel
+	rcall compare_basic2
+	push r20
+	ldi r20, $BB
+	;out portb, r20
+	pop r20	
+	ret 
+
+
+
+;33333333333333333333333 Action 2 3333333333333333333333333333333333333333333
+
+
+action2:   ;Past
+	rcall DATABASE_TO_SRAM4
+	rcall print1
+	
+	ldi YH, high(testregister4) ;3C0   
+	ldi YL, low(testregister4)
+	rcall send_regmodel
+	rcall BigDEL
+	rcall DEL15ms         ;getting new fingerprint
+
+
+
+get_input:
+	rcall ready2
+	
+	rcall waitforbuttonpress2
+	rcall convert_to_position
+	push r18
+	push r21
+	push r22
+	lds r21,  0x0808                  
+	mov r22,r21
+	lsl r22
+	subi r22,$F2
+	sts 0x0809, r22
+	;out portb, r21  ; adress where it is dsrtorinhg
+
+	sts 0x03EB, r21
+	rcall binary_to_decimal 
+	;subi r21, $D0   ;lcd output
+	;sts $C000, r21  
+
+	pop r22
+	pop r21
+	pop r18
+	/*
+	ldi YH, high(testregister6) ;400 
+	ldi YL, low(testregister6)
+	rcall send_LoadCharBuffertest    ;load charbuffer from location x, as Char 2
+	rcall BigDEL
+	*/
+	ldi YH, high(testregister5) ;3E0
+	ldi YL, low(testregister5)
+	rcall send_search2
+	rcall BigDEL
+	rcall compare_basic2 
+	rcall BigDEL
+	ret
+
+
+send_search2:          
+push r25  
+push r19
+push r23
+ldi r23, 0
+ldi r19, 2
+				ldi r18, 11
+			  LDI ZH, HIGH(search2*2)
+              LDI ZL, LOW(search2*2)
+			  rcall Mess1Out
+			  lds r25, 0x0808
+repeat:	
+			mov buffer,r23
+			  rcall UART_send_byte
+			  rcall UART_delay			  
+			  mov buffer,r25
+			  rcall UART_send_byte
+			  rcall UART_delay	
+			  dec r19
+			  brne repeat
+norrepeat:
+			mov buffer,r23
+			 rcall UART_send_byte
+			 lds r25, 0x0809
+			 mov buffer,r25
+			 rcall UART_send_byte
+			  rcall UART_delay				  
+pop r23 
+pop r19
+pop r25
+ret
+
+
+
+
+
+convert_to_position:  ;get singla from keyboard and give a key number 
+	;r21 signal
+	;r23 - ra
+	;r24 - rb
+	push r23
+	Push r24
+	push r21
+	;column
+	sbrs r21,0
+	ldi r23,$0
+	sbrs r21,1
+	ldi r23,$1
+	sbrs r21,2
+	ldi r23,$2
+	sbrs r21,3
+	ldi r23,$3
+
+	;row
+	sbrs r21,4
+	ldi r24,$0
+	sbrs r21,5
+	ldi r24,$4
+	sbrs r21,6
+	ldi r24,$8
+	sbrs r21,7
+	ldi r24,$C
+
+	;add
+	add r23,r24
+	mov r21,r23
+	sts 0x808, r21
+	pop r21
+	pop r23
+	pop r24
+	ret
+
+
+
+
+
+
+;444444444444444444444444  Action 3 4444444444444444444444444444444444444444
+;general database search for match
+action3:   ;Past
+	rcall clrdis
+	rcall DATABASE_TO_SRAM4
+
+
+	rcall print1
+	
+	ldi YH, high(testregister4) ;3C0   
+	ldi YL, low(testregister4)
+	rcall send_regmodel
+	rcall BigDEL
+	rcall DEL15ms
+
+	
+	ldi YH, high(testregister5) ;3E0
+	ldi YL, low(testregister5)
+	rcall send_search
+	rcall BigDEL
+	rcall compare_basic2 
+	rcall comparepeople
+	rcall BigDEL
+	rcall clrdis
+	rcall send_This_is_ID
+	rcall Password
+	rcall bigdel
+finalaction3: 
+	ret
+/*
+recordspecific:  ;recrods the Person to lcoation 60 etc. 
+	push r25  ;register esponsible for page number
+	ldi r25, 62
+	rcall action2 
+	pop r25
+	*/
+comparepeople:
+	push r16
+	lds r16, 0x03EB
+	cpi r16, 60
+	breq SayTomas
+	cpi r16, 61
+	breq SayNelson
+	;cpi r16, 62
+	;breq SayGeorge
+	pop r16
+	ret
+
+SayTomas:
+	rcall clrdis
+	 LDI ZH, HIGH(2*Tomas)
+     LDI ZL, LOW(2*Tomas)
+     LDI r18, 7 ;number of characters or bytes
+	rcall Mess1More22
+	rcall password
+	rcall bigdel
+	rjmp finalaction3
+
+SayNelson:	
+	rcall clrdis
+	LDI ZH, HIGH(2*Nelson)
+     LDI ZL, LOW(2*Nelson)
+     LDI r18, 8 ;number of characters or bytes
+	rcall Mess1More22
+	rcall password
+	rcall bigdel
+	rjmp finalaction3
+/*
+SayGeorge:	
+	rcall clrdis
+	LDI ZH, HIGH(2*George)
+     LDI ZL, LOW(2*George)
+     LDI r18, 8 ;number of characters or bytes
+	rcall Mess1More22
+	rcall bigdel
+	rjmp finalaction3
+*/
+
+Password:
+	push r16
+	ldi r16, 22
+	sts 0x0750, r16
+	pop r16
+	ret
+	
+
+
+
+This_is_ID:
+.db " This is the ID: "
+send_This_is_ID:	
+	rcall clrdis
+	LDI ZH, HIGH(2*This_is_ID)
+     LDI ZL, LOW(2*This_is_ID)
+     LDI r18, 16 ;number of characters or bytes
+rcall Mess1More22
+rcall binary_to_decimal
+rcall bigdel
+rcall clrdis
+ ret
+
+ ;^^^^^^^^^^^^^^^^^^^^^^^^^^Binary to decimal subroutine  ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+ binary_to_decimal:
+	push r16
+	push r23
+	;ldi r23, 10
+	lds r16, 0x03EB
+	cpi r16, 10
+	brge greaterthan10
+seconddigit:
+	subi r16, $D0
+	;ldi r16, $30  
+	rcall del49ms 
+	sts $C000, r16
+	rcall bigdel
+	pop r16
+	pop r23
+	ret
+
+greaterthan10:
+	ldi r23, $31
+	sts $C000, r23
+	subi r16, $0A
+	;out portb, r16
+	rjmp seconddigit
+
+;22222222222222222222222 Action 4 2222222222222222222222222222222222222222222
+;Adds new fingerpritn to database
+action4:   
+;Keep
+rcall print1
+	ldi YH, high(testregister2) ;380    
+	ldi YL, low(testregister2)
+	rcall send_regmodel
+	rcall BigDEL
+
+	ldi YH, high(testregister3) ;3A0   
+	ldi YL, low(testregister3)
+	rcall send_Store4       ;iterate in memory
+	;rcall send_Store2       ;works the same as store 1
+	rcall BigDEL
+
+	ret
+
+
+Print1:
+	ldi YH, high(testregister9) 
+	ldi YL, low(testregister9)        
+	rcall send_genimg		   
+	rcall BigDEL
+	ldi YH, high(testregister) ;360
+	ldi YL, low(testregister) 
+	rcall send_img2tBuff1  
+	rcall BigDEL    
+	ldi YH, high(testregister9) 
+	ldi YL, low(testregister9)
+	rcall send_genimg		   
+	rcall BigDEL
+	ldi YH, high(testregister1) ;380
+	ldi YL, low(testregister1) 
+	rcall send_img2tBuff2 
+	rcall BigDEL	
+	push r19
+	ldi r19, $AA
+	;out portb, r19
+	pop r19	
+	ret
+
+;~~~~~~~~~~~~~~~~~~~ Action 5 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+;deletes database and memory 1-15 addresses
+action5:
+	ldi YH, high(testregister9) ;3E0
+	ldi YL, low(testregister9)
+	rcall send_DeleteChar
+	ldi r25, 2
+	rcall bigdel
+	ret
+
+
+;@@@@@@@@@@@@@@@@@@@@@@@@@@ Action 6 @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@	
+;returns number of existing stored fingerprints in the memory of scanner
+action6:
+
+	ldi YH, high(testregister6) ;400
+	ldi YL, low(testregister6)
+	rcall send_TempleteNum
+	rcall bigdel
+	push r16
+	
+	lds r16, 0x040B
+	sts 0x03EB, r16
+	rcall binary_to_decimal
+	rcall bigdel
+	rcall clrdis
+	pop r16
+	ret
+	

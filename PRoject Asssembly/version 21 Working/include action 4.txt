@@ -1,0 +1,49 @@
+/*
+ * AsmFile1.asm
+ *
+ *  Created: 14/11/2017 15:41:18
+ *   Author: nmt115
+*/
+
+action4:   ;Past
+	rcall clrdis
+	rcall Idisp
+	rcall DATABASE_TO_SRAM4
+
+
+	ldi YH, high(testregister9) ;3A0   
+	ldi YL, low(testregister9)
+	rcall send_genimg	
+	rcall BigDEL
+
+	ldi YH, high(testregister9) ;3C0   
+	ldi YL, low(testregister9)
+	rcall send_img2tBuff1
+	rcall BigDEL
+
+
+	ldi YH, high(testregister9) ;3A0   
+	ldi YL, low(testregister9)
+	rcall send_genimg	
+	rcall BigDEL
+
+	ldi YH, high(testregister9) ;3C0   
+	ldi YL, low(testregister9)
+	rcall send_img2tBuff2
+	rcall BigDEL
+	
+	ldi YH, high(testregister4) ;3C0   
+	ldi YL, low(testregister4)
+	rcall send_regmodel
+	rcall BigDEL
+	rcall DEL15ms
+
+	
+	ldi YH, high(testregister5) ;3E0
+	ldi YL, low(testregister5)
+	rcall send_search
+	rcall BigDEL
+	rcall compare_basic2 
+	rcall BigDEL
+	ret
+

@@ -1,0 +1,12 @@
+;300 Comment indicates SRAM location 0x0300
+
+;Sentence continues to-
+;-next line in this way
+
+:CP stands for Command Package the intruction-
+:-code sends to the fingerprint Scanner
+
+;ID of person/ memory location/ address interchangeable
+
+
+rcall compare_basic2;Output on LCD and Buzzer the result of Matching

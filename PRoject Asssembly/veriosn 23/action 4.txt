@@ -1,0 +1,123 @@
+/*
+ * AsmFile1.asm
+ *
+ *  Created: 14/11/2017 15:41:18
+ *   Author: nmt115
+*/
+
+action4:   ;Past
+	rcall clrdis
+	rcall Idisp
+	rcall DATABASE_TO_SRAM4
+
+
+	ldi YH, high(testregister9) ;3A0   
+	ldi YL, low(testregister9)
+	rcall send_genimg	
+	rcall BigDEL
+
+	ldi YH, high(testregister9) ;3C0   
+	ldi YL, low(testregister9)
+	rcall send_img2tBuff1
+	rcall BigDEL
+
+
+	ldi YH, high(testregister9) ;3A0   
+	ldi YL, low(testregister9)
+	rcall send_genimg	
+	rcall BigDEL
+
+	ldi YH, high(testregister9) ;3C0   
+	ldi YL, low(testregister9)
+	rcall send_img2tBuff2
+	rcall BigDEL
+	
+	ldi YH, high(testregister4) ;3C0   
+	ldi YL, low(testregister4)
+	rcall send_regmodel
+	rcall BigDEL
+	rcall DEL15ms
+
+	
+	ldi YH, high(testregister5) ;3E0
+	ldi YL, low(testregister5)
+	rcall send_search
+	rcall BigDEL
+	rcall compare_basic2 
+	rcall comparepeople
+	rcall BigDEL
+	rcall clrdis
+	rcall send_This_is_ID
+	rcall readpagenumber
+	rcall bigdel
+	ret
+
+readpagenumber:
+	push r16
+	lds r16, 0x03EB
+	;subi r16, $D0   ;lcd output
+	sts $C000, r16
+	pop r16
+	ret
+	
+recordspecific:  ;recrods the Person to lcoation 60
+	push r25  ;register esponsible for page number
+	ldi r25, 62
+	rcall action2 
+	pop r25
+
+comparepeople:
+	push r16
+	lds r16, 0x03EB
+	cpi r16, 60
+	breq SayTomas
+	cpi r16, 61
+	breq SayNelson
+	cpi r16, 62
+	breq SayGeorge
+	pop r16
+	rcall readpagenumber
+	ret
+
+SayTomas:
+	rcall clrdis
+	 LDI ZH, HIGH(2*Tomas)
+     LDI ZL, LOW(2*Tomas)
+     LDI r18, 7 ;number of characters or bytes
+rcall Mess1More22
+rcall bigdel
+  ret
+
+SayNelson:	
+	rcall clrdis
+	LDI ZH, HIGH(2*Nelson)
+     LDI ZL, LOW(2*Nelson)
+     LDI r18, 8 ;number of characters or bytes
+rcall Mess1More22
+rcall bigdel
+  ret
+
+SayGeorge:	
+	rcall clrdis
+	LDI ZH, HIGH(2*George)
+     LDI ZL, LOW(2*George)
+     LDI r18, 8 ;number of characters or bytes
+rcall Mess1More22
+rcall bigdel
+  ret
+
+
+
+
+This_is_ID:
+.db " This is the ID: "
+send_This_is_ID:	
+	rcall clrdis
+	LDI ZH, HIGH(2*This_is_ID)
+     LDI ZL, LOW(2*This_is_ID)
+     LDI r18, 18 ;number of characters or bytes
+rcall Mess1More22
+rcall bigdel
+rcall bigdel
+rcall clrdis
+ ret

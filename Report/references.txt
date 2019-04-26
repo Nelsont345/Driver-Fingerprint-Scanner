@@ -1,0 +1,8 @@
+REFRENCES
+
+
+1.	Handbook : 978-1-84882-253-5
+
+2.	Seon-Woo Back, Yong-Geon Lee, Sang-Shin Lee, and Geun-Sik Son, "Moisture-insensitive optical fingerprint scanner based on polarization resolved in-finger scattered light," Opt. Express 24, 19195-19202 (2016)
+
+3.      https://github.com/sirgal/AVR-ASM-Software-UART/blob/master/software_uart.asm

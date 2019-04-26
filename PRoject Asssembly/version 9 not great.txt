@@ -1,0 +1,980 @@
+;Copyright (c) 2013 Manolis Agkopian		    
+;See the file LICENCE for copying permission.	    ;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+	.DEVICE ATmega128
+	.include "m128def.inc"
+
+
+
+
+;***** Pin definitions *****
+.equ	UART_TxPort = PORTD    ;set port D aS OUTPUT FOR TRANSMIT
+.equ	UART_TxDDR  = DDRD				;DIRECTION REGISTER
+.equ	UART_RxPin  = PIND				;sET PIN D FOR READ
+.equ	UART_RxDDR  = DDRD					;DIRECTION REGISTER
+.equ	RxD	= 2							;set pin  2 as receive, might be a different pin
+.equ	TxD	= 3								;set pin 3 as transmit
+
+;.equ	savedregister=0x0200      ;Address in SRAM, where the new database will be stored
+.equ	compare_address = 0x0300
+.equ	savedregister=0x0329      ;Address in SRAM, where the new database will be stored
+.equ	testregister= 0x0352
+.equ	testregister2= 0x037B
+.equ    testregister3 = 0x03A4
+.equ    testregister4 = 0x03CD
+.equ    testregister5 = 0x03F6
+.equ    testregister6 = 0x041F
+.equ    testregister7 = 0x0448
+.equ    testregister8 = 0x0471
+.equ    testregister9 = 0x049A 
+.equ	testregister92 = 0x04C3  
+
+
+;*****    Registers    *****
+.def	bitcounter  = R24				;??
+.def	temp	    = R16			;COUNTER?
+.def	UART_buffer = R23			;WHat IS BUFFER?
+
+;*****  Speed setting  *****
+.equ	CRYSTAL_FREQ = 8000000   ;SET READ/ WRITE TO BE EQUAL, 8MHZ, now 1
+.equ	BAUD 		 =  57600  ;57600     ;bits per second, rate ;9600
+
+;*****       Etc       *****
+.equ	stop_bits 	       = 1     ;STOPS READING
+; hand-picked for easier auto-baud calculations (no division)
+.equ	cycles_per_bit 	   = 12 ;without delays + 4*nop
+.equ	const_delay_cycles = 9	;rjmp + ret + 2*nop
+
+; byte in ram that keeps speed
+.dseg
+DELAY_VALUE: .byte 1        ;assign memory for clock speed value?
+.cseg
+
+;***** Precalculations *****
+;pure cycles necessary per bit
+.equ	c = CRYSTAL_FREQ / BAUD			;relates clock speed to transmission
+;delay cycles
+.equ	d = (c - cycles_per_bit - 2*const_delay_cycles)/2
+;delay value	
+.equ	b = d / 3						;divison by 3 of d, definition
+
+; throw error if we're out of bounds
+.if b > 255
+	.error "Baud rate is too low!"		;check if transmission speed is correct
+.elif b <= 0
+	.error "Baud rate is too high!"
+.endif
+
+; ******* Port B Setup Code ****  
+		ldi r16, $FF		; will set to outputs so i cab use Leds for debugging
+		out DDRB , r16		; Port B Direction Register
+		ldi r16, 00		; Who cares what is it....
+		out PORTB, r16		; Port B value
+
+		ldi r16, $0F		; Stack Pointer Setup
+		out SPH,r16			; Stack Pointer High Byte 
+		ldi r16, $FF		; Stack Pointer Setup 
+		out SPL,r16			; Stack Pointer Low Byte 
+
+		rjmp main
+genimg:
+.db $EF,$01,$FF,$FF,$FF,$FF,$01,$00,$03,$01, $00, $05,$08,$00
+
+img2tBuff1:
+.db $EF,$01,$FF,$FF,$FF,$FF,$01,$00,$04,$02,$1,$00,$08,$0
+
+img2tBuff2:
+.db $EF,$01,$FF,$FF,$FF,$FF,$01,$00,$04,$02,$2,$00,$09,$0
+
+regmodel:
+.db $EF,$01,$FF,$FF,$FF,$FF,$01,$00,$03,$05,$00,$09    
+
+Store1:
+.db $EF,$01,$FF,$FF,$FF,$FF,$01,$00,$06,$06,$01, $00, $01, $00, $0F, $00  
+
+Store2:
+.db $EF,$01,$FF,$FF,$FF,$FF,$01,$00,$06,$06,$02, $00, $02, $00, $11, $00
+
+LoadCharBuffer1:
+.db $EF,$01,$FF,$FF,$FF,$FF,$01,$00,$06,$07,$01, $00, $01, $00, $10, $00
+
+LoadCharBuffer2:
+.db $EF,$01,$FF,$FF,$FF,$FF,$01,$00,$06,$07,$02, $00, $01, $00, $12, $00	;loading as char 2 , pritn 1
+
+PreciseMatch:
+.db $EF,$01,$FF,$FF,$FF,$FF,$01,$00,$03,$03, $00, $07,$08,$00
+
+Search:
+.db $EF,$01,$FF,$FF,$FF,$FF,$01,$00,$08,$04, $01, $00,$01 ,$00, $01, $10
+
+
+
+
+;****************************************************
+;**********************CODE HERE*********************
+;****************************************************
+
+;****************************************************
+;*****                 SEND BYTE                *****
+;****************************************************
+; UART_buffer -> UART
+UART_send_byte:	
+	ldi		bitcounter, 9 + stop_bits ;CHECK IF CORRECRT, 7 + stop_bits
+	com		UART_buffer	
+	sec		
+
+; 12 cycles here (without delays)
+uart_send_next_bit:	
+	brcc	uart_send_1
+	cbi		UART_TxPort, TxD
+	rjmp	uart_wait
+
+uart_send_1:	
+	sbi		UART_TxPort, TxD
+	nop
+
+uart_wait:	
+	rcall 	UART_delay	
+	rcall 	UART_delay
+
+	nop	nop nop nop
+	lsr		UART_buffer
+	dec		bitcounter		
+	brne	uart_send_next_bit
+					
+	sbi		UART_TxPort, TxD
+	ret		
+		
+;****************************************************
+;*****                 GET BYTE                 *****
+;****************************************************
+; UART -> UART_buffer
+UART_get_byte:	
+	ldi 	bitcounter, 9
+
+uart_wait_for_start:	
+	sbic 	UART_RxPin, RxD	
+	rjmp 	uart_wait_for_start
+	;synchronize for 0.5 bit length
+	rcall 	UART_delay	
+
+; 10 cycles here (without delays)
+uart_get_bit:	
+	rcall 	UART_delay	
+	rcall 	UART_delay		
+
+	clc			
+	sbic 	UART_RxPin, RxD	;RxD is a pin where out data will appear bit by bit
+	sec			
+	
+	nop	nop nop nop
+	dec 	bitcounter		
+	breq 	uart_bit_done	
+				
+	ror 	UART_buffer		
+	rjmp 	uart_get_bit	
+
+uart_bit_done:	
+	ret
+
+;****************************************************
+;*****                UART DELAY                *****
+;****************************************************
+; 3*b + const_delay_cycles
+UART_delay:	
+	lds		temp, DELAY_VALUE
+UART_delay1:	
+	dec		temp
+	brne	UART_delay1
+	nop
+
+	ret
+
+uart_reinit:
+
+
+
+	in		temp, UART_TxDDR
+	ori		temp, (1<<TxD)
+	out		UART_TxDDR, temp
+	sbi		UART_TxPort, TxD
+
+	in		temp, UART_RxDDR
+	andi	temp, ~(1<<RxD) 
+	out		UART_RxDDR, temp
+
+	ldi		temp, b
+	sts		DELAY_VALUE, temp
+	ret
+
+	ldi temp, $01
+	ret
+;**************************  MAIN ***************************************
+;***********************************************************************
+;******************************************************************
+;******************************************************************
+;******************************************************************
+;******************************************************************
+;******************************************************************
+;******************************************************************
+;******************************************************************
+;******************************************************************
+;******************************************************************
+;******************************************************************
+
+main:  
+                             ;!!!!!!!!!!!!RUNS ONCE HERE
+	;rcall Idisp
+	rcall uart_reinit
+	rcall DATABASE_TO_SRAM ;this takes the compasioson message and saves that in memorry at 0x0400
+main2:
+	
+	rcall waitforbuttonpress	
+	rjmp main2
+;rcall compare_basic2    	
+
+
+
+Print1:
+	rcall send_genimg	
+	rcall save_data_start
+	rcall send_img2tBuff1                
+	rcall save_data_start2
+	push r20
+	lds r20, 0x0332
+	cpi  r20, $00
+	brne Print1
+	pop r20	
+	
+	push r20
+	ldi r20, $AA
+	out portb, r20
+	rcall megadel
+	pop r20	
+	ret
+
+; +++++++++++++++++++++++++++++++++  ACTION 1 +++++++++++++++++++++++++++++++++++
+action1:
+	rcall Print1
+Print2:
+	rcall send_genimg	
+	rcall save_data_start3
+	rcall send_img2tBuff2                 
+	rcall save_data_start4
+	push r20
+	lds r20, 0x0384
+	cpi  r20, $00
+	brne Print2
+	pop r20	
+	
+	rcall send_regmodel
+	rcall save_data_start5
+	rcall send_PreciseMatch
+	rcall save_data_start10        ;match before storing
+
+	push r20
+	ldi r20, $BB
+	out portb, r20
+	rcall megadel
+	pop r20	
+	rcall compare_basic2 
+	ret 
+
+; +++++++++++++++++++++++++++++++++  ACTION 2 +++++++++++++++++++++++++++++++++++
+action2:   ;Keep
+
+	rcall send_genimg	
+	rcall save_data_start3
+	rcall send_img2tBuff2
+	rcall send_regmodel
+	rcall send_Store2             ;stores in lcation 1
+	rcall save_data_start4
+	ret
+
+
+; +++++++++++++++++++++++++++++++++  ACTION 3 +++++++++++++++++++++++++++++++++++
+action3:   ;Past
+	rcall send_genimg	
+	rcall send_img2tBuff1
+	rcall save_data_start4
+	rcall send_regmodel
+	rcall save_data_start5
+	push r20
+	ldi r20, $BB
+	out portb, r20
+	rcall megadel
+	pop r20	
+	rcall send_LoadCharBuffer2    ;load charbuffer from location 1, as Char 2
+
+	rcall send_regmodel
+	rcall save_data_start6
+	rcall send_PreciseMatch
+	rcall save_data_start10        ;match before storing
+	rcall compare_basic2 
+	rcall megadel
+
+	ret
+
+	; +++++++++++++++++++++++++++++++++  ACTION 4 +++++++++++++++++++++++++++++++++++
+action4:   ;Past
+	;rcall print1	
+	rcall send_genimg
+	rcall send_img2tBuff1
+	;rcall save_data_start2
+	rcall send_regmodel
+	;rcall save_data_start5
+	push r20
+	lds r20, 0x0384
+	cpi  r20, $00
+	brne action4
+	pop r20	
+	;rcall send_LoadCharBuffer2    ;load charbuffer from location 1, as Char 2
+
+	;rcall send_regmodel
+	;rcall save_data_start5
+	rcall send_Search
+	rcall save_data_start10        ;match before storing
+	rcall compare_basic2 
+	rcall megadel
+
+	ret
+
+		
+
+
+;XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX  Beginning OF RETURN    XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+;XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX  Beginning OF RETURN    XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+
+
+
+save_data_start:
+	push r20
+	 ldi XH, high(savedregister) ;create 16 bit address, create *2?
+	 ldi XL, low(savedregister)
+	 ldi r25, 12
+	 ; memory initisised
+save_data: ; 12 bytes to collect - collect byte by byte
+	rcall UART_get_byte	
+	mov r22, UART_buffer
+	;out portb, r22
+	;set up memory for input i.e what is saved in r22
+	;use SRAM 
+	st X+, r22         ;store 8 bits wiht a 16 bit address in SRAM
+
+
+	Dec r25
+	cpi  r25, 0
+	brne save_data ; if it is zero just go on
+	pop r20
+	ret
+
+
+;^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^DATABASE TO SRAM^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+DATABASE_TO_SRAM: ;saves to 0x0300
+push r20
+compare_database:
+
+.db $EF, $01, $FF, $FF, $FF, $FF, $07,$00, $05, $00, $00, $0A  ;;change packangelength (8th) to 05
+
+makingZalocation:
+	ldi XH, high(compare_address) ;create 16 bit address? ;0x0300
+	ldi XL, low(compare_address)  ;Leave as 8 bit
+
+	ldi ZH, HIGH(compare_database*2)  ;leave as 16 bit
+    ldi ZL, LOW(compare_database*2)
+	ldi r20, 12  ;counter
+
+	;address
+	
+program_to_memory:
+	lpm 
+	;mov r19, r0 ;r19 cointans byte by byte
+	ADIW ZL, $01
+	dec r20
+	
+	;now you have data in r19 and you want to store it
+	
+	st X+, r0            ;don't need sts, if using X
+
+	;end if counted
+	cpi r20, $0
+	breq program_to_memory_end
+	rjmp program_to_memory
+
+program_to_memory_end:
+	pop r20
+	ret
+
+;^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^DATABASE TO SRAM  END^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ ;*********************************COMPARING1**************************************
+
+; in this routine we are going to compare 2 sram databases
+compare_basic2:
+
+push r17
+push r20
+push r21
+push r18
+ldi r18,  0  ;counter
+rcall Comp1Out2Z
+rcall Comp1Out2Y
+rjmp Comp1More2
+
+
+Comp1Out2Z:	;the one we compare to
+
+			  LDI ZH, HIGH(compare_address)    ;address for comparison 
+              LDI ZL, LOW(compare_address)
+			  ret
+Comp1Out2Y:
+              ldi YL, low(testregister9)           ;saved output from MAtch
+			  ldi YH, high(testregister9) 
+			  ret
+  
+			   
+Comp1More2:
+			;load Z to r20
+
+			ld r20, Z+
+			ld r17, Y+
+
+			inc r18
+
+			cp r20, r17 ; compare the two X, Z
+			brne statefalse2 ;go to false message if not equal
+
+			
+
+
+			cpi r18, 10 ; compare when end the cycle		 ;chnaged to 8 for matching	
+			brne Comp1More2
+
+Comp1End2:     
+
+	push r22
+	ldi r22, $03
+	out portB, r22
+	 ;ldi r25, 0  ;to end the loop
+	pop r22
+	rcall bigdel
+	rcall bigdel
+
+			pop r18
+			pop r21
+			pop r20
+			pop r17
+			ret
+
+statefalse2:
+	push r22
+	ldi r22, $0F
+	out portB, r22
+	 ;ldi r25, 0  ;to end the loop
+	pop r22
+	rcall bigdel
+	rcall bigdel
+	;rjmp statefalse2
+
+	pop r18
+	pop r21
+	pop r20
+	pop r17
+	ret
+	;rjmp sendloop
+
+
+
+;XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX  END OF RETURN    XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+;XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX  END OF RETURN    XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+
+
+;&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&  SENDING PACKAGES &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
+
+send_genimg:
+              
+				ldi r18, 12
+			  LDI ZH, HIGH(genimg*2)
+              LDI ZL, LOW(genimg*2)
+			  rcall Mess1Out
+			  ret
+send_img2tBuff1:
+             
+			ldi r18,13
+			  LDI ZH, HIGH(img2tBuff1*2)
+              LDI ZL, LOW(img2tBuff1*2)
+			  rcall Mess1Out
+			  ret
+
+send_img2tBuff2:
+             
+			ldi r18,13
+			  LDI ZH, HIGH(img2tBuff2*2)
+              LDI ZL, LOW(img2tBuff2*2)
+			  rcall Mess1Out
+			  ret
+
+send_regmodel:
+             
+			ldi r18,12
+			  LDI ZH, HIGH(regmodel*2)
+              LDI ZL, LOW(regmodel*2)
+			  rcall Mess1Out
+			  ret
+
+send_Store1:
+             
+			ldi r18,15
+			  LDI ZH, HIGH(Store1*2)
+              LDI ZL, LOW(Store1*2)
+			  rcall Mess1Out
+			  ret
+
+send_Store2:
+             
+			ldi r18,15
+			  LDI ZH, HIGH(Store2*2)
+              LDI ZL, LOW(Store2*2)
+			  rcall Mess1Out
+			  ret
+
+send_LoadCharBuffer1:
+             
+			ldi r18,15
+			  LDI ZH, HIGH(LoadCharBuffer1*2)
+              LDI ZL, LOW(LoadCharBuffer1*2)
+			  rcall Mess1Out
+			  ret
+
+send_LoadCharBuffer2:
+             
+			ldi r18,15
+			  LDI ZH, HIGH(LoadCharBuffer2*2)
+              LDI ZL, LOW(LoadCharBuffer2*2)
+			  rcall Mess1Out
+			  ret
+
+send_PreciseMatch:
+             
+			ldi r18,12
+			  LDI ZH, HIGH(PreciseMatch*2)
+              LDI ZL, LOW(PreciseMatch*2)
+			  rcall Mess1Out
+			  ret
+
+send_Search:
+             
+			ldi r18,12
+			  LDI ZH, HIGH(Search*2)
+              LDI ZL, LOW(Search*2)
+			  rcall Mess1Out
+			  ret
+
+;*************************************SEND BYTE BY BYTE****************************************
+	  
+Mess1Out:
+			push r17
+
+
+			  
+              ;LD r18, r22;number of characters or bytes ; this displays the number of r18 ; to send command 13  ;varies betwen 12 and 13
+
+Mess1More:
+              LPM 
+              MOV r17, r0
+              mov UART_buffer,r17
+			  rcall UART_send_byte
+              ;rcall Mess1LCD ; send it To LCD
+			  ;rcall busylcd
+              
+			  ;delay this
+			
+			;rcall UART_delay
+			;rcall UART_delay
+			rcall UART_delay
+			
+			  
+			  DEC r18
+			  cpi r18, $0
+			  breq Mess1End
+			  ADIW ZL, $01
+			  rjmp Mess1More
+			  ; if r18>0 then retrurn to mess1more
+Mess1End:     
+			pop r17
+			ret
+
+
+;*************************************** LCD ROutines
+
+;*******************************************************************************
+; Display Initialization routine
+;
+; Since we cannot rely that that Power Supply will have on power up
+; the required by Hitachi Specs.....we do the initialization 'by hand'.
+; Follow Blindly the White-Red Book of Hitachi.
+; Hitachi Liquid Crystal Disply LCD Initialization Sequence.
+;
+Idisp:		
+		RCALL DEL15ms                ; wait 15ms for things to relax after power up           
+		ldi r16,    $30	         ; Hitachi says do it...
+		sts   $8000,r16                      ; so i do it....
+		RCALL DEL4P1ms             ; Hitachi says wait 4.1 msec
+		sts   $8000,r16	         ; and again I do what I'm told
+		rcall Del49ms
+		sts   $8000,r16	         ; here we go again folks
+                rcall busylcd		
+		ldi r16, $3F	         ; Function Set : 2 lines + 5x7 Font
+		sts  $8000,r16
+                rcall busylcd
+		ldi r16,  $08	         ;display off
+		sts  $8000, r16
+                rcall busylcd		
+		ldi r16,  $01	         ;display on
+		sts  $8000,  r16
+                rcall busylcd
+                ldi r16, $38	        ;function set
+		sts  $8000, r16
+		rcall busylcd
+		ldi r16, $0E	        ;display on
+		sts  $8000, r16
+		rcall busylcd
+		ldi r16, $06                           ;entry mode set increment no shift
+		sts  $8000,  r16
+                rcall busylcd
+                clr r16
+                ret
+;
+;**********************************************************************************
+; This clears the display so we can start all over again
+;
+CLRDIS:
+	        ldi r16,$01	; Clear Display send cursor 
+		sts $8000,r16   ; to the most left position
+		rcall busylcd
+                ret
+;**********************************************************************************
+; A routine the probes the display BUSY bit
+;
+   
+busylcd:        
+        lds r16, $8000   ;access 
+        sbrc r16, 7      ;check busy bit  7
+        rjmp busylcd
+        rcall BigDEL
+
+        ret              ;return if clear
+;
+;********************   DELAY ROUTINES ********************************************
+BigDEL:
+             rcall Del49ms
+             rcall Del49ms
+             rcall Del49ms
+             rcall Del49ms
+             rcall Del49ms
+             ret
+;
+DEL15ms:
+;
+; This is a 15 msec delay routine. Each cycle costs
+; rcall           -> 3 CC
+; ret              -> 4 CC
+; 2*LDI        -> 2 CC 
+; SBIW         -> 2 CC * 19997
+; BRNE        -> 1/2 CC * 19997
+; 
+
+            LDI XH, HIGH(19997)
+            LDI XL, LOW (19997)
+COUNT:  
+            SBIW XL, 1
+            BRNE COUNT
+            RET
+;
+DEL4P1ms:
+            LDI XH, HIGH(5464)
+            LDI XL, LOW (5464)
+COUNT1:
+            SBIW XL, 1
+            BRNE COUNT1
+            RET 
+;
+DEL100mus:
+            LDI XH, HIGH(131)
+            LDI XL, LOW (131)
+COUNT2:
+            SBIW XL, 1
+            BRNE COUNT2
+            RET 
+;
+DEL49ms:
+            LDI XH, HIGH(65535)
+            LDI XL, LOW (65535)
+COUNT3:
+            SBIW XL, 1
+            BRNE COUNT3
+            RET 
+
+;%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+;%%%%%%%%%%%%%%%%%%%%%%  USELESS TEST   CODE  %%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+
+;%%%%%%%%%%%%%%%%%%%%%%%%%%%%    2nd     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+save_data_start2:
+	push r20
+	 ldi XH, high(testregister) ;create 16 bit address, create *2?
+	 ldi XL, low(testregister)
+	 ldi r25, 12
+	 ; memory initisised
+save_data2: ; 12 bytes to collect - collect byte by byte
+	rcall UART_get_byte	
+	mov r22, UART_buffer
+	;out portb, r22
+	;set up memory for input i.e what is saved in r22
+	;use SRAM 
+	st X+, r22         ;store 8 bits wiht a 16 bit address in SRAM
+
+
+	Dec r25
+	cpi  r25, 0
+	brne save_data2 ; if it is zero just go on
+	pop r20
+	ret
+;%%%%%%%%%%%%%%%%%%%%%%%%%%%%    3rd     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+save_data_start3:
+	push r20
+	 ldi XH, high(testregister2) ;create 16 bit address, create *2?
+	 ldi XL, low(testregister2)
+	 ldi r25, 12
+	 ; memory initisised
+save_data3: ; 12 bytes to collect - collect byte by byte
+	rcall UART_get_byte	
+	mov r22, UART_buffer
+	;out portb, r22
+	;set up memory for input i.e what is saved in r22
+	;use SRAM 
+	st X+, r22         ;store 8 bits wiht a 16 bit address in SRAM
+
+
+	Dec r25
+	cpi  r25, 0
+	brne save_data3 ; if it is zero just go on
+	pop r20
+	ret
+
+;%%%%%%%%%%%%%%%%%%%%%%%%%%%%    4th    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+save_data_start4:
+	push r20
+	 ldi XH, high(testregister3) ;create 16 bit address, create *2?
+	 ldi XL, low(testregister3)
+	 ldi r25, 12
+	 ; memory initisised
+save_data4: ; 12 bytes to collect - collect byte by byte
+	rcall UART_get_byte	
+	mov r22, UART_buffer
+	;out portb, r22
+	;set up memory for input i.e what is saved in r22
+	;use SRAM 
+	st X+, r22         ;store 8 bits wiht a 16 bit address in SRAM
+
+
+	Dec r25
+	cpi  r25, 0
+	brne save_data4 ; if it is zero just go on
+	pop r20
+	ret
+
+;%%%%%%%%%%%%%%%%%%%%%%%%%%%%    5th    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+save_data_start5:
+	push r20
+	 ldi XH, high(testregister4) ;create 16 bit address, create *2?
+	 ldi XL, low(testregister4)
+	 ldi r25, 12
+	 ; memory initisised
+save_data5: ; 12 bytes to collect - collect byte by byte
+	rcall UART_get_byte	
+	mov r22, UART_buffer
+	;out portb, r22
+	;set up memory for input i.e what is saved in r22
+	;use SRAM 
+	st X+, r22         ;store 8 bits wiht a 16 bit address in SRAM
+
+
+	Dec r25
+	cpi  r25, 0
+	brne save_data5 ; if it is zero just go on
+	pop r20
+	ret
+
+;%%%%%%%%%%%%%%%%%%%%%%%%%%%%    6th    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+save_data_start6:
+	push r20
+	 ldi XH, high(testregister5) ;create 16 bit address, create *2?
+	 ldi XL, low(testregister5)
+	 ldi r25, 12
+	 ; memory initisised
+save_data6: ; 12 bytes to collect - collect byte by byte
+	rcall UART_get_byte	
+	mov r22, UART_buffer
+	;out portb, r22
+	;set up memory for input i.e what is saved in r22
+	;use SRAM 
+	st X+, r22         ;store 8 bits wiht a 16 bit address in SRAM
+
+
+	Dec r25
+	cpi  r25, 0
+	brne save_data6 ; if it is zero just go on
+	pop r20
+	ret
+
+;%%%%%%%%%%%%%%%%%%%%%%%%%%%%    7th    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+save_data_start7:
+	push r20
+	 ldi XH, high(testregister6) ;create 16 bit address, create *2?
+	 ldi XL, low(testregister6)
+	 ldi r25, 12
+	 ; memory initisised
+save_data7: ; 12 bytes to collect - collect byte by byte
+	rcall UART_get_byte	
+	mov r22, UART_buffer
+	;out portb, r22
+	;set up memory for input i.e what is saved in r22
+	;use SRAM 
+	st X+, r22         ;store 8 bits wiht a 16 bit address in SRAM
+
+
+	Dec r25
+	cpi  r25, 0
+	brne save_data7 ; if it is zero just go on
+	pop r20
+	ret
+
+;%%%%%%%%%%%%%%%%%%%%%%%%%%%%    8th    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+save_data_start8:
+	push r20
+	 ldi XH, high(testregister7) ;create 16 bit address, create *2?
+	 ldi XL, low(testregister7)
+	 ldi r25, 12
+	 ; memory initisised
+save_data8: ; 12 bytes to collect - collect byte by byte
+	rcall UART_get_byte	
+	mov r22, UART_buffer
+	;out portb, r22
+	;set up memory for input i.e what is saved in r22
+	;use SRAM 
+	st X+, r22         ;store 8 bits wiht a 16 bit address in SRAM
+
+
+	Dec r25
+	cpi  r25, 0
+	brne save_data8 ; if it is zero just go on
+	pop r20
+	ret
+
+;%%%%%%%%%%%%%%%%%%%%%%%%%%%%    9th    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+save_data_start9:
+	push r20
+	 ldi XH, high(testregister8) ;create 16 bit address, create *2?
+	 ldi XL, low(testregister8)
+	 ldi r25, 12
+	 ; memory initisised
+save_data9: ; 12 bytes to collect - collect byte by byte
+	rcall UART_get_byte	
+	mov r22, UART_buffer
+	;out portb, r22
+	;set up memory for input i.e what is saved in r22
+	;use SRAM 
+	st X+, r22         ;store 8 bits wiht a 16 bit address in SRAM
+
+
+	Dec r25
+	cpi  r25, 0
+	brne save_data9 ; if it is zero just go on
+	pop r20
+	ret
+
+;%%%%%%%%%%%%%%%%%%%%%%%%%%%%    10th    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+save_data_start10:
+	push r20
+
+	 ldi XH, high(testregister9) ;create 16 bit address, create *2?
+	 ldi XL, low(testregister9)
+	 ldi r25, 14
+
+	 ldi ZH, high(testregister92) ;create 16 bit address, create *2?
+	 ldi ZL, low(testregister92)
+
+	 ; memory initisised
+save_data10: ; 12 bytes to collect - collect byte by byte
+	rcall UART_get_byte	
+	mov r22, UART_buffer
+	;out portb, r22
+	;set up memory for input i.e what is saved in r22
+	;use SRAM 
+	st X+, r22         ;store 8 bits wiht a 16 bit address in SRAM
+	st Z+, r22
+
+	Dec r25
+	cpi  r25, 0
+	brne save_data10 ; if it is zero just go on
+	pop r20
+	ret
+
+
+
+	 ;%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+megadel:
+	rcall BigDEL
+	rcall BigDEL
+	rcall BigDEL
+	rcall BigDEL
+	rcall BigDEL
+	rcall BigDEL
+	rcall BigDEL
+	rcall BigDEL
+	rcall BigDEL
+	rcall BigDEL
+	ret
+
+; ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ WAIT FOR  BUTTION PRESS AND MOVE SOMWEHRE ~~~~~~~~~~~
+
+
+waitforbuttonpress:
+    ;ldi r21,$00
+	in r21, PIND
+	out portb, r21
+	cpi r21, $FF
+	breq waitforbuttonpress
+	
+	;here have list of conditions
+	cpi r21,$FE ; pin 1
+	breq action1call ; ACTION 1
+	
+	cpi r21, $FD ; PIN2
+	breq action2call ; ACTION 2
+	
+	cpi r21, $FB ; PIN3
+	breq action3call ;Action 3
+
+	cpi r21, $F7 ; PIN4
+	breq action4call ;Action 4
+
+	ret
+
+action1call:
+	rcall action1
+	ret
+action2call:
+	rcall action2
+	ret
+action3call:
+	rcall action3
+	ret
+action4call:
+	rcall action4
+	ret

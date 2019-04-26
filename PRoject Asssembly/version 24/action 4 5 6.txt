@@ -1,0 +1,161 @@
+/*
+ * AsmFile1.asm
+ *
+ *  Created: 14/11/2017 15:41:18
+ *   Author: nmt115
+*/
+
+action4:   ;Past
+	rcall clrdis
+	rcall Idisp
+	rcall DATABASE_TO_SRAM4
+
+
+	ldi YH, high(testregister9) ;3A0   
+	ldi YL, low(testregister9)
+	rcall send_genimg	
+	rcall BigDEL
+
+	ldi YH, high(testregister9) ;3C0   
+	ldi YL, low(testregister9)
+	rcall send_img2tBuff1
+	rcall BigDEL
+
+
+	ldi YH, high(testregister9) ;3A0   
+	ldi YL, low(testregister9)
+	rcall send_genimg	
+	rcall BigDEL
+
+	ldi YH, high(testregister9) ;3C0   
+	ldi YL, low(testregister9)
+	rcall send_img2tBuff2
+	rcall BigDEL
+	
+	ldi YH, high(testregister4) ;3C0   
+	ldi YL, low(testregister4)
+	rcall send_regmodel
+	rcall BigDEL
+	rcall DEL15ms
+
+	
+	ldi YH, high(testregister5) ;3E0
+	ldi YL, low(testregister5)
+	rcall send_search
+	rcall BigDEL
+	rcall compare_basic2 
+	rcall comparepeople
+	rcall BigDEL
+	rcall clrdis
+	rcall send_This_is_ID
+	rcall bigdel
+	ret
+
+
+
+
+
+
+ 
+ 	
+recordspecific:  ;recrods the Person to lcoation 60
+	push r25  ;register esponsible for page number
+	ldi r25, 62
+	rcall action2 
+	pop r25
+
+comparepeople:
+	push r16
+	lds r16, 0x03EB
+	cpi r16, 60
+	breq SayTomas
+	cpi r16, 61
+	breq SayNelson
+	cpi r16, 62
+	breq SayGeorge
+	pop r16
+	ret
+
+SayTomas:
+	rcall clrdis
+	 LDI ZH, HIGH(2*Tomas)
+     LDI ZL, LOW(2*Tomas)
+     LDI r18, 7 ;number of characters or bytes
+rcall Mess1More22
+rcall bigdel
+  ret
+
+SayNelson:	
+	rcall clrdis
+	LDI ZH, HIGH(2*Nelson)
+     LDI ZL, LOW(2*Nelson)
+     LDI r18, 8 ;number of characters or bytes
+rcall Mess1More22
+rcall bigdel
+  ret
+
+SayGeorge:	
+	rcall clrdis
+	LDI ZH, HIGH(2*George)
+     LDI ZL, LOW(2*George)
+     LDI r18, 8 ;number of characters or bytes
+rcall Mess1More22
+rcall bigdel
+  ret
+
+
+
+
+This_is_ID:
+.db " This is the ID: "
+send_This_is_ID:	
+	rcall clrdis
+	LDI ZH, HIGH(2*This_is_ID)
+     LDI ZL, LOW(2*This_is_ID)
+     LDI r18, 15 ;number of characters or bytes
+rcall Mess1More22
+rcall binary_to_decimal
+rcall bigdel
+rcall bigdel
+rcall clrdis
+ ret
+
+  binary_to_decimal:
+	push r16
+	push r23
+	;ldi r23, 10
+	lds r16, 0x03EB
+	cpi r16, 10
+	brge greaterthan10
+seconddigit:
+	subi r16, $D0   
+	sts $C000, r16
+	pop r16
+	pop r23
+	ret
+
+greaterthan10:
+	ldi r23, 1
+	sts $C000, r23
+	subi r16, $0A
+	rjmp seconddigit
+
+action5:
+	ldi YH, high(testregister9) ;3E0
+	ldi YL, low(testregister9)
+	rcall send_DeleteChar
+	rcall bigdel
+	ret
+	
+action6:
+	ldi YH, high(testregister6) ;400
+	ldi YL, low(testregister6)
+	rcall send_TempleteNum
+	lds r16, 0x0411
+	subi r16, $D0 
+	subi r16, $FD
+	sts $C000, r16
+	rcall bigdel
+	rcall clrdis
+	ret
+	
